@@ -6,9 +6,13 @@ Version 1.x receives security fixes.
 
 ## Reporting a vulnerability
 
-Please use GitHub's private security advisory form on the repository. Do not open a public issue for an undisclosed vulnerability.
+Please use the private security advisory form for this repository:
 
-Include the affected version, a minimal archive or code reproduction, the expected behavior, and the observed behavior. Do not include secrets, private keys, personal data, or archives containing sensitive content. Reports are acknowledged within seven days. Fixes are released as patch versions with a changelog entry.
+https://github.com/draarivpatel-ui/pyzipcage/security/advisories/new
+
+Do not open a public issue for an undisclosed vulnerability.
+
+Include the affected version, a minimal archive or code reproduction, the expected behavior, and the observed behavior. Do not include secrets, private keys, personal data, or archives containing sensitive content. Reports are acknowledged within 3 business days. Initial triage is targeted within 14 days. A fix, mitigation, or documented resolution is targeted within 90 days. Fixes are released as patch versions with a changelog entry.
 
 ## In scope
 
