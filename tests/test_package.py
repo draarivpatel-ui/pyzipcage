@@ -6,6 +6,7 @@ import ast
 import dataclasses
 import inspect
 import re
+import subprocess
 import typing
 import unittest
 from pathlib import Path
@@ -154,7 +155,7 @@ class DocumentationTests(unittest.TestCase):
     def test_readme_exact_test_count_is_current(self):
         match = re.search(r"currently contains (\d+) real tests", read("README.md"))
         self.assertIsNotNone(match)
-        self.assertEqual(465, int(match.group(1)))
+        self.assertEqual(487, int(match.group(1)))
 
 
 class PublicApiTests(unittest.TestCase):
@@ -297,11 +298,19 @@ class SourceHygieneTests(unittest.TestCase):
             for prefix in prefixes:
                 self.assertNotIn(prefix, text, "{} contains a vendor-shaped token".format(path))
 
-    def test_no_pycache_or_compiled_python_files_are_present(self):
-        for path in ROOT.rglob("*"):
-            self.assertNotIn("__pycache__", path.parts)
-            self.assertNotIn(".pyc", path.suffixes)
-            self.assertNotIn(".pyo", path.suffixes)
+    def test_no_pycache_or_compiled_python_files_are_tracked(self):
+        result = subprocess.run(
+            ["git", "ls-files"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        for relative in result.stdout.splitlines():
+            parts = tuple(relative.split("/"))
+            self.assertNotIn("__pycache__", parts)
+            self.assertFalse(relative.endswith((".pyc", ".pyo")), relative)
 
     def test_source_avoids_dynamic_code_and_network_modules(self):
         forbidden = ("eval(", "exec(", "import subprocess", "import socket", "import urllib", "import requests", "import ctypes")

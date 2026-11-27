@@ -80,6 +80,12 @@ for name in ("CON", "con", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", 
 for index, path in enumerate(("CON.txt", "con.txt", "dir/CON/x", "NUL.txt", "com1.txt", "lpt9.txt")):
     _REJECT_CASES.append(("reserved_variant_%02d" % index, path, "ERR_ZIPCAGE_RESERVED_NAME", None))
 
+for index, path in enumerate(("COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³", "com¹.txt", "lpt³.txt")):
+    _REJECT_CASES.append(("reserved_superscript_%02d" % index, path, "ERR_ZIPCAGE_RESERVED_NAME", None))
+
+for index, path in enumerate(("CONIN$", "CONOUT$", "conin$", "conout$", "conin$.txt", "conout$.txt", "dir/CONIN$/x", "dir/CONOUT$/x")):
+    _REJECT_CASES.append(("reserved_console_%02d" % index, path, "ERR_ZIPCAGE_RESERVED_NAME", None))
+
 for index, path in enumerate(("file.", "file ", "dir/file./x", "dir/file /x", "file..", "file  ", "a/b. ", "a/b  .")):
     _REJECT_CASES.append(("trailing_%02d" % index, path, "ERR_ZIPCAGE_TRAILING_DOT_OR_SPACE", None))
 

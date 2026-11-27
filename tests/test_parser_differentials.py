@@ -464,6 +464,22 @@ class AdditionalParserRegressionTests(ZipCageTestCase):
         policy = ZipPolicy(max_entry_bytes=0xFFFFFFFF, max_total_bytes=0xFFFFFFFF, max_compression_ratio=1000000)
         self.assertHasFinding(pyzipcage.inspect_zip_bytes(archive, policy), "ERR_ZIPCAGE_UNSUPPORTED_ZIP64")
 
+    def test_unsigned_descriptor_crc_signature_edge_is_accepted(self):
+        payload = (b"A" * 32) + bytes.fromhex("b2654b78")
+        self.assertEqual(0x08074B50, crc32(payload))
+        archive = valid_build([
+            {
+                "name": "edge",
+                "data": payload,
+                "method": "deflate",
+                "data_descriptor": True,
+                "signed_descriptor": False,
+            }
+        ])
+        report = pyzipcage.inspect_zip_bytes(archive)
+        self.assertTrue(report.safe, [finding.to_dict() for finding in report.findings])
+        self.assertEqual(payload, pyzipcage.read_zip_entry(archive, "edge"))
+
 
 if __name__ == "__main__":
     unittest.main()

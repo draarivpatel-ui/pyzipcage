@@ -296,8 +296,8 @@ def extract_zip_file(zip_path: object, target_dir: object, policy: Optional[ZipP
     """Read a ZIP file within the archive cap and safely extract it."""
 
     config = _resolve_policy(policy)
-    data, _ = _read_file_bytes_limited(zip_path, config.max_archive_bytes)
-    if len(data) > config.max_archive_bytes:
+    data, observed_size = _read_file_bytes_limited(zip_path, config.max_archive_bytes)
+    if observed_size > config.max_archive_bytes:
         raise ZipCageError(SIZE_LIMIT, "archive byte length exceeds max_archive_bytes")
     return extract_zip_bytes(data, target_dir, config)
 

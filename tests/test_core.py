@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import multiprocessing
 import os
 import tempfile
 import unittest
@@ -21,6 +22,23 @@ from _support import (
     valid_build,
     ZipCageTestCase,
 )
+
+
+def _fifo_input_child(zip_path, target_dir):
+    try:
+        pyzipcage.inspect_zip_file(zip_path)
+    except ZipCageError as exc:
+        if exc.code != "ERR_ZIPCAGE_INVALID_INPUT":
+            raise
+    else:
+        raise AssertionError("inspect_zip_file accepted a FIFO")
+    try:
+        pyzipcage.extract_zip_file(zip_path, target_dir)
+    except ZipCageError as exc:
+        if exc.code != "ERR_ZIPCAGE_INVALID_INPUT":
+            raise
+    else:
+        raise AssertionError("extract_zip_file accepted a FIFO")
 
 
 class CoreArchiveTests(ZipCageTestCase):
@@ -215,6 +233,13 @@ class CoreArchiveTests(ZipCageTestCase):
     def test_string_archive_input_is_rejected(self):
         self.assertError("ERR_ZIPCAGE_INVALID_INPUT", pyzipcage.inspect_zip_bytes, "not bytes")
 
+    def test_inspect_file_nul_path_is_invalid_input(self):
+        self.assertError("ERR_ZIPCAGE_INVALID_INPUT", pyzipcage.inspect_zip_file, "a\x00b")
+
+    def test_extract_file_nul_path_is_invalid_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertError("ERR_ZIPCAGE_INVALID_INPUT", pyzipcage.extract_zip_file, "a\x00b", directory)
+
     def test_invalid_policy_object_is_rejected(self):
         self.assertError("ERR_ZIPCAGE_INVALID_OPTIONS", pyzipcage.inspect_zip_bytes, simple_zip(), object())
 
@@ -408,6 +433,22 @@ class CoreArchiveTests(ZipCageTestCase):
 
 
 class BoundedFileAndMutationTests(ZipCageTestCase):
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "mkfifo"), "FIFO probe requires POSIX")
+    def test_fifo_input_is_rejected_without_blocking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            zip_path = os.path.join(directory, "in.zip")
+            target_dir = os.path.join(directory, "out")
+            os.mkfifo(zip_path)
+            os.mkdir(target_dir)
+            process = multiprocessing.get_context("fork").Process(target=_fifo_input_child, args=(zip_path, target_dir))
+            process.start()
+            process.join(2)
+            if process.is_alive():
+                process.terminate()
+                process.join()
+                self.fail("FIFO input blocked the file-reading API")
+            self.assertEqual(0, process.exitcode)
+
     def test_inspect_file_applies_archive_cap_before_parsing(self):
         archive = simple_zip()
         with tempfile.TemporaryDirectory() as directory:

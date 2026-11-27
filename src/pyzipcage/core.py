@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import stat
 import struct
 import unicodedata
 import zlib
@@ -85,7 +86,7 @@ UNSUPPORTED_FLAG_MASK = (
     | 0x8000
 )
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-RESERVED_DEVICE_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$")
+RESERVED_DEVICE_RE = re.compile(r"^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])$")
 DRIVE_RE = re.compile(r"^[A-Za-z]:")
 TRAILING_DOT_SPACE_RE = re.compile(r"[. ]$")
 PROTOTYPE_KEYS = frozenset(("__proto__", "constructor", "prototype"))
@@ -444,32 +445,53 @@ def _compare_unsigned(
         )
 
 
+def _data_descriptor_state(data: bytes, entry: _ParsedEntry, central_directory_offset: int) -> Tuple[int, bool, bool, bool]:
+    assert entry.data_end is not None
+    start = entry.data_end
+    if start + 12 > central_directory_offset:
+        return 0, True, False, False
+    first = _u32(data, start)
+    unsigned_matches = (
+        first == entry.crc32
+        and _u32(data, start + 4) == entry.compressed_size
+        and _u32(data, start + 8) == entry.uncompressed_size
+    )
+    signed_available = first == DATA_DESCRIPTOR_SIGNATURE and start + 16 <= central_directory_offset
+    signed_matches = False
+    if signed_available:
+        signed_matches = (
+            _u32(data, start + 4) == entry.crc32
+            and _u32(data, start + 8) == entry.compressed_size
+            and _u32(data, start + 12) == entry.uncompressed_size
+        )
+    if unsigned_matches and signed_matches:
+        return 16, False, False, True
+    if unsigned_matches:
+        return 12, False, False, False
+    if signed_matches:
+        return 16, False, False, False
+    if first == DATA_DESCRIPTOR_SIGNATURE and not signed_available:
+        return 0, True, False, False
+    return (16 if signed_available else 12), False, True, False
+
+
 def _verify_data_descriptor(
     data: bytes,
     entry: _ParsedEntry,
     central_directory_offset: int,
     add_finding: Callable[[str, str, Optional[int], Optional[str]], None],
 ) -> None:
-    assert entry.data_end is not None
-    start = entry.data_end
-    if start + 12 > central_directory_offset:
+    _length, truncated, mismatch, ambiguous = _data_descriptor_state(data, entry, central_directory_offset)
+    if truncated:
         add_finding(TRUNCATED, "data descriptor is missing or truncated", entry.index, entry.name)
-        return
-    crc = _u32(data, start)
-    compressed_size = _u32(data, start + 4)
-    uncompressed_size = _u32(data, start + 8)
-    if crc == DATA_DESCRIPTOR_SIGNATURE:
-        if start + 16 > central_directory_offset:
-            add_finding(TRUNCATED, "signed data descriptor is truncated", entry.index, entry.name)
-            return
-        crc = _u32(data, start + 4)
-        compressed_size = _u32(data, start + 8)
-        uncompressed_size = _u32(data, start + 12)
-    if (
-        crc != entry.crc32
-        or compressed_size != entry.compressed_size
-        or uncompressed_size != entry.uncompressed_size
-    ):
+    elif ambiguous:
+        add_finding(
+            MALFORMED_ZIP,
+            "data descriptor is ambiguous in signed and unsigned interpretations",
+            entry.index,
+            entry.name,
+        )
+    elif mismatch:
         add_finding(HEADER_MISMATCH, "data descriptor does not match the central directory", entry.index, entry.name)
 
 
@@ -852,7 +874,8 @@ def _descriptor_length_for_entry(data: bytes, entry: _ParsedEntry, central_direc
         return 0
     if entry.data_end is None or entry.data_end + 12 > central_directory_offset:
         return 0
-    return 16 if _u32(data, entry.data_end) == DATA_DESCRIPTOR_SIGNATURE else 12
+    length, _truncated, _mismatch, _ambiguous = _data_descriptor_state(data, entry, central_directory_offset)
+    return length
 
 
 def _add_local_layout_findings(
@@ -1137,15 +1160,39 @@ def _read_file_bytes_limited(path: object, limit: int) -> Tuple[bytes, int]:
         raise ZipCageError(INVALID_INPUT, "path must be a filesystem path", repr(path))
     if not isinstance(file_path, (str, bytes)) or len(file_path) == 0:
         raise ZipCageError(INVALID_INPUT, "path must be a non-empty filesystem path", repr(path))
+    if (isinstance(file_path, str) and "\x00" in file_path) or (isinstance(file_path, bytes) and b"\x00" in file_path):
+        raise ZipCageError(INVALID_INPUT, "path must not contain NUL bytes", repr(path))
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
-        with open(file_path, "rb") as handle:
-            data = handle.read(limit + 1)
-            try:
-                observed_size = os.fstat(handle.fileno()).st_size
-            except OSError:
-                observed_size = len(data)
+        descriptor = os.open(file_path, flags)
     except OSError as exc:
         raise ZipCageError(INVALID_INPUT, "zip file could not be read: " + exc.__class__.__name__, repr(path))
+    try:
+        try:
+            initial_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(initial_stat.st_mode):
+                raise ZipCageError(INVALID_INPUT, "zip file must be a regular file", repr(path))
+            parts = []
+            remaining = limit + 1
+            while remaining > 0:
+                chunk = os.read(descriptor, remaining)
+                if not chunk:
+                    break
+                parts.append(chunk)
+                remaining -= len(chunk)
+            data = b"".join(parts)
+            try:
+                observed_size = os.fstat(descriptor).st_size
+            except OSError:
+                observed_size = len(data)
+        except OSError as exc:
+            raise ZipCageError(INVALID_INPUT, "zip file could not be read: " + exc.__class__.__name__, repr(path))
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
     return data, max(observed_size, len(data))
 
 
@@ -1154,7 +1201,7 @@ def inspect_zip_file(path: object, policy: Optional[ZipPolicy] = None) -> Inspec
 
     config = _resolve_policy(policy)
     data, observed_size = _read_file_bytes_limited(path, config.max_archive_bytes)
-    if len(data) > config.max_archive_bytes:
+    if observed_size > config.max_archive_bytes:
         findings = [
             Finding(
                 code=SIZE_LIMIT,

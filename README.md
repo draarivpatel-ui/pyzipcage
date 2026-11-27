@@ -160,7 +160,7 @@ Every expected validation, parsing, decompression, and extraction failure uses `
 
 ## Test evidence and development
 
-The offline unittest suite currently contains 465 real tests covering path traversal, zip-bomb limits, overlap primitives, header parser differentials, forged EOCD shapes, Unicode path differentials, ZIP64 sentinels, Unix special files, bounded decompression, extraction confinement, CLI behavior, typing, packaging, and repository hygiene. All 465 tests passed in the local verification run for this commit.
+The offline unittest suite currently contains 487 real tests covering path traversal, zip-bomb limits, overlap primitives, header parser differentials, forged EOCD shapes, Unicode path differentials, ZIP64 sentinels, Unix special files, bounded decompression, extraction confinement, CLI behavior, typing, packaging, and repository hygiene. All 487 tests passed in the local verification run for this commit.
 
 Run the suite with:
 

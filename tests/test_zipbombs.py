@@ -174,7 +174,25 @@ class OverlapAndLayoutTests(ZipCageTestCase):
 
 
 class DeflateDeceptionTests(ZipCageTestCase):
-    pass
+    def test_single_input_multi_megabyte_expansion_remains_chunk_capped(self):
+        from pyzipcage.core import _inflate_raw_bounded
+
+        payload = b"\0" * (1024 * 1024)
+        compressed = deflate_raw(payload)
+        chunks = list(_inflate_raw_bounded(compressed, len(payload), "bounded-probe"))
+        self.assertLessEqual(max(len(chunk) for chunk in chunks), 65536)
+        self.assertEqual(len(payload), sum(len(chunk) for chunk in chunks))
+
+    def test_trailing_bytes_beyond_input_chunk_boundary_are_rejected(self):
+        from pyzipcage.core import _inflate_raw_bounded
+
+        payload = b"abcdef"
+        compressed = deflate_raw(payload) + (b"X" * 65537)
+        self.assertError(
+            "ERR_ZIPCAGE_TRAILING_COMPRESSED_DATA",
+            list,
+            _inflate_raw_bounded(compressed, len(payload), "trailing-probe"),
+        )
 
 
 for declared in (0, 1, 2, 9, 10, 50):
